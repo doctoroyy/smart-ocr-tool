@@ -1,6 +1,7 @@
 {
-  "name": "vue-paddleocr-app",
-  "version": "0.0.0",
+  "name": "smart-ocr-tool",
+  "version": "1.0.0",
+  "description": "智能 OCR 识别工具 - 支持桌面和移动端的高精度文字识别应用",
   "private": true,
   "type": "module",
   "scripts": {

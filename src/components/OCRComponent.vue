@@ -254,7 +254,20 @@ const performOCR = async () => {
     if (useNativeOCR.value) {
       // 使用 Tesseract.js
       console.log('使用 Tesseract.js 进行识别...')
-      const worker = await ocrModel.value.createWorker('chi_sim+eng')
+      const worker = await ocrModel.value.createWorker('chi_sim+eng', 1, {
+        logger: m => console.log('Tesseract:', m)
+      })
+      
+      // 设置更高精度的 OCR 参数
+      await worker.setParameters({
+        tessedit_char_whitelist: '', // 移除字符限制
+        tessedit_pageseg_mode: ocrModel.value.PSM.AUTO, // 自动页面分割
+        tessedit_ocr_engine_mode: ocrModel.value.OEM.LSTM_ONLY, // 使用最新的 LSTM 引擎
+        preserve_interword_spaces: '1', // 保留词间空格
+        user_defined_dpi: '300', // 设置更高 DPI
+        tessedit_create_hocr: '1', // 创建 hOCR 输出以获得更好的结果
+      })
+      
       const { data } = await worker.recognize(img)
       await worker.terminate()
       

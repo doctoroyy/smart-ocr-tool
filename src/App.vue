@@ -1,8 +1,8 @@
 <template>
   <div id="app">
     <header>
-      <h1>Vue PaddleOCR App</h1>
-      <p>基于 PaddleOCR 的前端文字识别应用</p>
+      <h1>智能 OCR 识别工具</h1>
+      <p>支持桌面和移动端的高精度文字识别应用</p>
     </header>
 
     <main>
