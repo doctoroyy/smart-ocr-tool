@@ -329,28 +329,36 @@ const performOCR = async () => {
       // 使用 Tesseract.js
       console.log('使用 Tesseract.js 进行识别...')
       
-      // 图像预处理：增强对比度和清晰度
+      // 智能图像预处理
       const canvas = document.createElement('canvas')
       const ctx = canvas.getContext('2d')
-      canvas.width = img.width
-      canvas.height = img.height
       
-      // 绘制原图
-      ctx.drawImage(img, 0, 0)
+      // 放大图像提高识别精度
+      const scale = 2
+      canvas.width = img.width * scale
+      canvas.height = img.height * scale
       
-      // 获取图像数据进行预处理
+      // 使用高质量缩放
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      
+      // 轻度图像增强
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       const data = imageData.data
       
-      // 增强对比度和去噪
+      // 轻度对比度增强，保持细节
       for (let i = 0; i < data.length; i += 4) {
-        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
-        // 二值化处理，提高文字识别率
-        const threshold = 128
-        const newValue = gray > threshold ? 255 : 0
-        data[i] = newValue     // R
-        data[i + 1] = newValue // G
-        data[i + 2] = newValue // B
+        // 增强对比度但不做二值化
+        const r = data[i]
+        const g = data[i + 1]
+        const b = data[i + 2]
+        
+        // 轻度对比度增强
+        const factor = 1.2
+        data[i] = Math.min(255, r * factor)
+        data[i + 1] = Math.min(255, g * factor)
+        data[i + 2] = Math.min(255, b * factor)
       }
       
       ctx.putImageData(imageData, 0, 0)
@@ -359,41 +367,77 @@ const performOCR = async () => {
         logger: m => console.log('Tesseract:', m)
       })
       
-      // 设置更高精度的 OCR 参数
+      // 优化的 OCR 参数设置
       await worker.setParameters({
-        tessedit_char_whitelist: '', // 移除字符限制
-        tessedit_pageseg_mode: ocrModel.value.PSM.SINGLE_BLOCK, // 单块文本模式，适合票据
-        tessedit_ocr_engine_mode: ocrModel.value.OEM.LSTM_ONLY, // 使用 LSTM 引擎
-        preserve_interword_spaces: '1', // 保留词间空格
-        user_defined_dpi: '300', // 设置更高 DPI
-        tessedit_create_hocr: '1', // 创建 hOCR 输出
-        tessedit_write_images: '0', // 不输出中间图像
-        classify_enable_learning: '0', // 禁用学习模式提高稳定性
-        classify_enable_adaptive_matcher: '1', // 启用自适应匹配
-        textord_really_old_xheight: '1', // 改善字符高度检测
-        textord_min_xheight: '10', // 最小字符高度
-        tessedit_reject_mode: '0', // 减少拒绝率
-        load_system_dawg: '0', // 禁用系统词典，提高中文识别
-        load_freq_dawg: '0', // 禁用频率词典
-        load_unambig_dawg: '0', // 禁用无歧义词典
-        load_punc_dawg: '0', // 禁用标点词典
-        load_number_dawg: '1', // 启用数字词典，票据有很多数字
-        load_bigram_dawg: '0', // 禁用双字母词典
+        tessedit_char_whitelist: '', // 允许所有字符
+        tessedit_pageseg_mode: ocrModel.value.PSM.AUTO, // 自动页面分割
+        tessedit_ocr_engine_mode: ocrModel.value.OEM.LSTM_ONLY, // LSTM 引擎
+        preserve_interword_spaces: '1', // 保留空格
+        user_defined_dpi: '300', // 高 DPI
+        tessedit_create_hocr: '1',
+        tessedit_write_images: '0',
+        classify_enable_learning: '1', // 启用学习
+        classify_enable_adaptive_matcher: '1',
+        textord_really_old_xheight: '0', // 使用新的字符高度检测
+        textord_min_xheight: '8',
+        tessedit_reject_mode: '2', // 适度拒绝模式
+        // 启用所有词典以提高准确率
+        load_system_dawg: '1',
+        load_freq_dawg: '1', 
+        load_unambig_dawg: '1',
+        load_punc_dawg: '1',
+        load_number_dawg: '1',
+        load_bigram_dawg: '1',
+        // 中文优化参数
+        chop_enable: '1', // 启用字符切分
+        wordrec_enable_assoc: '1', // 启用联想识别
+        segment_penalty_dict_nonword: '1.25', // 调整非词典词汇的惩罚
+        segment_penalty_garbage: '1.50', // 调整垃圾字符的惩罚
       })
       
-      // 使用预处理后的图像进行识别
-      const { data: ocrData } = await worker.recognize(canvas)
+      // 多次识别策略：尝试不同的页面分割模式
+      const recognitionAttempts = [
+        { psm: ocrModel.value.PSM.AUTO, name: 'AUTO' },
+        { psm: ocrModel.value.PSM.SINGLE_BLOCK, name: 'SINGLE_BLOCK' },
+        { psm: ocrModel.value.PSM.SINGLE_COLUMN, name: 'SINGLE_COLUMN' }
+      ]
+      
+      let bestResult = null
+      let bestConfidence = 0
+      
+      for (const attempt of recognitionAttempts) {
+        try {
+          console.log(`尝试 ${attempt.name} 模式识别...`)
+          await worker.setParameters({
+            tessedit_pageseg_mode: attempt.psm
+          })
+          
+          const { data } = await worker.recognize(canvas)
+          const confidence = data.confidence / 100
+          
+          console.log(`${attempt.name} 模式置信度: ${(confidence * 100).toFixed(1)}%`)
+          
+          if (confidence > bestConfidence && data.text.trim().length > 0) {
+            bestConfidence = confidence
+            bestResult = {
+              text: data.text.trim(),
+              confidence: confidence,
+              words: data.words,
+              mode: attempt.name
+            }
+          }
+        } catch (err) {
+          console.warn(`${attempt.name} 模式识别失败:`, err)
+        }
+      }
+      
       await worker.terminate()
       
-      // 后处理：清理识别结果
-      let cleanedText = ocrData.text.trim()
-      // 移除多余的空行和空格
-      cleanedText = cleanedText.replace(/\n\s*\n/g, '\n').replace(/\s+/g, ' ')
-      
-      results = {
-        text: cleanedText,
-        confidence: ocrData.confidence / 100,
-        words: ocrData.words
+      if (bestResult) {
+        console.log(`最佳识别结果来自 ${bestResult.mode} 模式，置信度: ${(bestResult.confidence * 100).toFixed(1)}%`)
+        results = bestResult
+      } else {
+        throw new Error('所有识别模式都失败了')
       }
     } else {
       // 使用 PaddleOCR
