@@ -74,13 +74,30 @@
         </div>
         <p class="engine-description">{{ getEngineDescription() }}</p>
       </div>
+      
+      <!-- 进度条显示 -->
+      <div v-if="loading" class="progress-section">
+        <div class="progress-header">
+          <h4>{{ progressStatus }}</h4>
+          <span class="progress-percent">{{ progress }}%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" :style="{ width: progress + '%' }"></div>
+        </div>
+        <div class="progress-details">
+          <div v-for="(step, index) in detailedProgress" :key="index" class="progress-step">
+            ✓ {{ step }}
+          </div>
+        </div>
+      </div>
+
       <button
         @click="performOCR"
-        :disabled="!selectedImage || loading || modelLoading"
+        :disabled="!selectedImage || loading || modelLoading || (!paddleOCRModel && !tesseractModel)"
         class="ocr-btn"
         :class="{ loading, disabled: modelLoading }"
       >
-        <span v-if="loading">识别中...</span>
+        <span v-if="loading">{{ progressStatus || '识别中...' }}</span>
         <span v-else-if="modelLoading">模型加载中...</span>
         <span v-else>开始识别</span>
       </button>
@@ -146,6 +163,9 @@ const loading = ref(false)
 const modelLoading = ref(true)
 const ocrResults = ref<OCRResult[]>([])
 const error = ref<string>('')
+const progress = ref(0)
+const progressStatus = ref('')
+const detailedProgress = ref<string[]>([])
 const ocrModel = ref<any>(null)
 const useNativeOCR = ref(false)
 const paddleOCRModel = ref<any>(null)
@@ -324,9 +344,19 @@ const clearImage = () => {
   }
 }
 
+// 更新进度
+const updateProgress = (percent: number, status: string, step?: string) => {
+  progress.value = Math.max(0, Math.min(100, percent))
+  progressStatus.value = status
+  if (step) {
+    detailedProgress.value.push(step)
+  }
+}
+
 // Tesseract.js 引擎处理函数
 const performTesseractOCR = async (img: HTMLImageElement) => {
   console.log('使用 Tesseract.js 进行识别...')
+  updateProgress(10, '准备图像处理', '开始使用 Tesseract.js 引擎')
   
   // 智能图像预处理
   const canvas = document.createElement('canvas')
@@ -337,6 +367,8 @@ const performTesseractOCR = async (img: HTMLImageElement) => {
   canvas.width = img.width * scale
   canvas.height = img.height * scale
   
+  updateProgress(20, '图像预处理中', '放大图像以提高识别精度')
+  
   // 使用高质量缩放
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
@@ -345,6 +377,8 @@ const performTesseractOCR = async (img: HTMLImageElement) => {
   // 轻度图像增强
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const data = imageData.data
+  
+  updateProgress(30, '图像优化中', '增强图像对比度和清晰度')
   
   // 轻度对比度增强，保持细节
   for (let i = 0; i < data.length; i += 4) {
@@ -361,9 +395,13 @@ const performTesseractOCR = async (img: HTMLImageElement) => {
   
   ctx.putImageData(imageData, 0, 0)
   
+  updateProgress(40, '初始化识别引擎', '创建 Tesseract 工作进程')
+  
   const worker = await ocrModel.value.createWorker('chi_sim+eng', 1, {
     logger: m => console.log('Tesseract:', m)
   })
+  
+  updateProgress(50, '配置识别参数', '设置中英文识别和优化参数')
   
   // 优化的 OCR 参数设置
   await worker.setParameters({
@@ -393,6 +431,8 @@ const performTesseractOCR = async (img: HTMLImageElement) => {
     segment_penalty_garbage: '1.50', // 调整垃圾字符的惩罚
   })
   
+  updateProgress(60, '开始文字识别', '分析图像中的文字内容')
+  
   // 多次识别策略：尝试不同的页面分割模式
   const recognitionAttempts = [
     { psm: ocrModel.value.PSM.AUTO, name: 'AUTO' },
@@ -402,10 +442,14 @@ const performTesseractOCR = async (img: HTMLImageElement) => {
   
   let bestResult = null
   let bestConfidence = 0
+  const progressStep = 25 / recognitionAttempts.length
   
-  for (const attempt of recognitionAttempts) {
+  for (let i = 0; i < recognitionAttempts.length; i++) {
+    const attempt = recognitionAttempts[i]
     try {
       console.log(`尝试 ${attempt.name} 模式识别...`)
+      updateProgress(60 + (i + 1) * progressStep, `识别模式 ${i + 1}/3`, `尝试 ${attempt.name} 识别模式`)
+      
       await worker.setParameters({
         tessedit_pageseg_mode: attempt.psm
       })
@@ -429,9 +473,11 @@ const performTesseractOCR = async (img: HTMLImageElement) => {
     }
   }
   
+  updateProgress(90, '处理识别结果', '清理工作进程')
   await worker.terminate()
   
   if (bestResult) {
+    updateProgress(100, '识别完成', `使用 ${bestResult.mode} 模式，置信度 ${(bestResult.confidence * 100).toFixed(1)}%`)
     console.log(`最佳识别结果来自 ${bestResult.mode} 模式，置信度: ${(bestResult.confidence * 100).toFixed(1)}%`)
     return bestResult
   } else {
@@ -442,7 +488,16 @@ const performTesseractOCR = async (img: HTMLImageElement) => {
 // PaddleOCR 引擎处理函数
 const performPaddleOCR = async (img: HTMLImageElement) => {
   console.log('使用 PaddleOCR 进行识别...')
-  return await ocrModel.value.recognize(img)
+  updateProgress(20, '初始化 PaddleOCR', '开始使用 PaddleOCR 引擎')
+  updateProgress(40, '准备图像数据', '传递图像到 PaddleOCR 模型')
+  updateProgress(60, '深度学习识别中', 'PaddleOCR 神经网络分析图像')
+  
+  const result = await ocrModel.value.recognize(img)
+  
+  updateProgress(90, '处理识别结果', '整理 PaddleOCR 输出结果')
+  updateProgress(100, '识别完成', 'PaddleOCR 识别成功完成')
+  
+  return result
 }
 
 // 处理 Tesseract.js 识别结果
@@ -501,6 +556,11 @@ const performOCR = async () => {
   loading.value = true
   error.value = ''
   ocrResults.value = []
+  progress.value = 0
+  progressStatus.value = ''
+  detailedProgress.value = []
+  
+  updateProgress(5, '准备开始识别', '初始化OCR识别流程')
 
   try {
     // 创建 Image 对象用于 OCR 识别
@@ -949,6 +1009,86 @@ const downloadText = () => {
   background: #f8f9fa;
   border-color: #42b883;
   color: #42b883;
+}
+
+.progress-section {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #e0e0e0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.progress-header h4 {
+  margin: 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.progress-percent {
+  font-weight: 600;
+  color: #42b883;
+  font-size: 1.1rem;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #f0f0f0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #42b883, #369870);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  animation: progressShine 2s infinite;
+}
+
+@keyframes progressShine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.progress-details {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.progress-step {
+  padding: 0.5rem 0;
+  color: #666;
+  font-size: 0.9rem;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.progress-step:last-child {
+  border-bottom: none;
 }
 
 .error-section {
