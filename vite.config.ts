@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [vue()],
   define: {
     global: 'globalThis',
-    'process.env': {},
-    Module: 'undefined'
+    'process.env': '{}',
+    'Module': 'undefined'
   },
   resolve: {
     alias: {
@@ -19,13 +19,20 @@ export default defineConfig({
     esbuildOptions: {
       define: {
         global: 'globalThis',
-        Module: 'undefined'
+        'Module': 'undefined'
       }
     }
   },
   build: {
     commonjsOptions: {
       transformMixedEsModules: true
+    },
+    rollupOptions: {
+      output: {
+        globals: {
+          'Module': 'undefined'
+        }
+      }
     }
   }
 })

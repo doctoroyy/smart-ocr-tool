@@ -5,6 +5,14 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vue PaddleOCR App</title>
+    <script>
+      // Define global variables for PaddleOCR compatibility
+      if (typeof window !== 'undefined') {
+        window.global = window.globalThis || window;
+        window.Module = undefined;
+        window.process = window.process || { env: {} };
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
