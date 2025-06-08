@@ -53,8 +53,26 @@
       <div v-if="modelLoading" class="model-loading">
         <p>⏳ 正在加载 OCR 模型，请稍候...</p>
       </div>
-      <div v-else-if="ocrModel" class="engine-info">
-        <p>{{ useNativeOCR ? '🔧 移动端兼容模式 (Tesseract.js)' : '⚡ 高性能模式 (PaddleOCR)' }}</p>
+      <div v-else-if="ocrModel" class="engine-controls">
+        <div class="engine-selector">
+          <button 
+            @click="switchEngine('paddle')" 
+            :class="{ active: selectedEngine === 'paddle', disabled: !paddleOCRModel }"
+            :disabled="!paddleOCRModel"
+            class="engine-btn"
+          >
+            ⚡ PaddleOCR
+          </button>
+          <button 
+            @click="switchEngine('tesseract')" 
+            :class="{ active: selectedEngine === 'tesseract', disabled: !tesseractModel }"
+            :disabled="!tesseractModel"
+            class="engine-btn"
+          >
+            🔧 Tesseract.js
+          </button>
+        </div>
+        <p class="engine-description">{{ getEngineDescription() }}</p>
       </div>
       <button
         @click="performOCR"
@@ -102,6 +120,10 @@ const ocrResults = ref<OCRResult[]>([])
 const error = ref<string>('')
 const ocrModel = ref<any>(null)
 const useNativeOCR = ref(false)
+const paddleOCRModel = ref<any>(null)
+const tesseractModel = ref<any>(null)
+const manualEngineSelection = ref(false)
+const selectedEngine = ref<string>('paddle')
 
 // 检查 WebGL 支持
 const checkWebGLSupport = () => {
@@ -140,45 +162,97 @@ const initTesseractOCR = async () => {
   }
 }
 
+// 切换 OCR 引擎
+const switchEngine = (engine: string) => {
+  if (engine === 'paddle' && paddleOCRModel.value) {
+    selectedEngine.value = 'paddle'
+    ocrModel.value = paddleOCRModel.value
+    useNativeOCR.value = false
+    manualEngineSelection.value = true
+    console.log('切换到 PaddleOCR 引擎')
+  } else if (engine === 'tesseract' && tesseractModel.value) {
+    selectedEngine.value = 'tesseract'
+    ocrModel.value = tesseractModel.value
+    useNativeOCR.value = true
+    manualEngineSelection.value = true
+    console.log('切换到 Tesseract.js 引擎')
+  }
+}
+
+// 获取引擎描述
+const getEngineDescription = () => {
+  if (selectedEngine.value === 'paddle') {
+    return '高性能模式 - 适用于桌面设备，识别速度快，准确率高'
+  } else if (selectedEngine.value === 'tesseract') {
+    return '兼容模式 - 适用于移动设备，纯JavaScript实现，兼容性更好'
+  }
+  return ''
+}
+
 // 初始化 OCR 模型
 onMounted(async () => {
   try {
-    console.log('开始检查设备兼容性...')
+    console.log('开始加载 OCR 引擎...')
     
-    // 首先尝试 PaddleOCR（需要 WebGL）
+    // 并行加载两个引擎
+    const loadEngines = []
+    
+    // 尝试加载 PaddleOCR
     if (checkWebGLSupport()) {
-      try {
-        console.log('检测到 WebGL 支持，尝试加载 PaddleOCR...')
-        const ocr = await import('@paddle-js-models/ocr')
-        console.log('PaddleOCR 模块导入成功, 开始初始化...')
-        
-        await ocr.init()
-        ocrModel.value = ocr
-        useNativeOCR.value = false
-        modelLoading.value = false
-        console.log('PaddleOCR 模型加载成功')
-        return
-      } catch (paddleError) {
-        console.warn('PaddleOCR 加载失败，尝试备用方案:', paddleError)
-      }
+      loadEngines.push(
+        (async () => {
+          try {
+            console.log('检测到 WebGL 支持，尝试加载 PaddleOCR...')
+            const ocr = await import('@paddle-js-models/ocr')
+            console.log('PaddleOCR 模块导入成功, 开始初始化...')
+            await ocr.init()
+            paddleOCRModel.value = ocr
+            console.log('PaddleOCR 模型加载成功')
+          } catch (paddleError) {
+            console.warn('PaddleOCR 加载失败:', paddleError)
+          }
+        })()
+      )
     }
     
-    // 如果 PaddleOCR 失败，尝试 Tesseract.js（纯 JS，移动端友好）
-    console.log('尝试加载 Tesseract.js 作为备用方案...')
-    const tesseract = await initTesseractOCR()
-    if (tesseract) {
-      ocrModel.value = tesseract
+    // 尝试加载 Tesseract.js
+    loadEngines.push(
+      (async () => {
+        try {
+          console.log('尝试加载 Tesseract.js...')
+          const tesseract = await initTesseractOCR()
+          if (tesseract) {
+            tesseractModel.value = tesseract
+            console.log('Tesseract.js 加载成功')
+          }
+        } catch (tesseractError) {
+          console.warn('Tesseract.js 加载失败:', tesseractError)
+        }
+      })()
+    )
+    
+    // 等待所有引擎加载完成
+    await Promise.all(loadEngines)
+    
+    // 设置默认引擎
+    if (paddleOCRModel.value) {
+      selectedEngine.value = 'paddle'
+      ocrModel.value = paddleOCRModel.value
+      useNativeOCR.value = false
+      console.log('默认使用 PaddleOCR 引擎')
+    } else if (tesseractModel.value) {
+      selectedEngine.value = 'tesseract'
+      ocrModel.value = tesseractModel.value
       useNativeOCR.value = true
-      modelLoading.value = false
-      console.log('Tesseract.js 加载成功（移动端兼容模式）')
-      return
+      console.log('默认使用 Tesseract.js 引擎')
+    } else {
+      throw new Error('无法加载任何 OCR 引擎')
     }
-    
-    throw new Error('无法加载任何 OCR 引擎')
     
   } catch (err) {
     console.error('OCR 初始化失败:', err)
     error.value = `OCR 初始化失败: 您的设备可能不支持当前的 OCR 功能。\n建议使用最新版本的 Chrome、Safari 或 Firefox 浏览器。`
+  } finally {
     modelLoading.value = false
   }
 })
@@ -459,6 +533,54 @@ const copyAllText = async () => {
   color: #666;
   background: #f5f5f5;
   border-radius: 4px;
+}
+
+.engine-controls {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.engine-selector {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-bottom: 0.5rem;
+}
+
+.engine-btn {
+  padding: 8px 16px;
+  border: 2px solid #ddd;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.3s;
+  color: #666;
+}
+
+.engine-btn:hover:not(:disabled) {
+  border-color: #42b883;
+  color: #42b883;
+}
+
+.engine-btn.active {
+  background: #42b883;
+  border-color: #42b883;
+  color: white;
+}
+
+.engine-btn:disabled {
+  background: #f5f5f5;
+  border-color: #ddd;
+  color: #ccc;
+  cursor: not-allowed;
+}
+
+.engine-description {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0;
+  line-height: 1.4;
 }
 
 .results-section {
