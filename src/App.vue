@@ -1,78 +1,54 @@
 <template>
   <div id="app">
     <header>
-      <div class="wrapper">
-        <nav>
-          <RouterLink to="/">首页</RouterLink>
-          <RouterLink to="/ocr">OCR识别</RouterLink>
-        </nav>
-      </div>
+      <h1>Vue PaddleOCR App</h1>
+      <p>基于 PaddleOCR 的前端文字识别应用</p>
     </header>
 
-    <RouterView />
+    <main>
+      <OCRComponent />
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { RouterLink, RouterView } from 'vue-router'
+import OCRComponent from './components/OCRComponent.vue'
 </script>
 
 <style scoped>
 header {
-  line-height: 1.5;
-  max-height: 100vh;
-}
-
-.wrapper {
-  display: flex;
-  place-items: flex-start flex-wrap;
-}
-
-nav {
-  width: 100%;
-  font-size: 12px;
   text-align: center;
-  margin-top: 2rem;
+  padding: 2rem 1rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  margin-bottom: 2rem;
 }
 
-nav a.router-link-exact-active {
-  color: var(--color-text);
+header h1 {
+  margin: 0 0 0.5rem 0;
+  font-size: 2.5rem;
+  font-weight: 600;
 }
 
-nav a.router-link-exact-active:hover {
-  background-color: transparent;
+header p {
+  margin: 0;
+  opacity: 0.9;
+  font-size: 1.1rem;
 }
 
-nav a {
-  display: inline-block;
-  padding: 0 1rem;
-  border-left: 1px solid var(--color-border);
+main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem 2rem;
 }
 
-nav a:first-of-type {
-  border: 0;
-}
-
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
+@media (max-width: 768px) {
+  header h1 {
+    font-size: 2rem;
   }
-
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  nav {
-    text-align: left;
-    margin-left: -1rem;
+  
+  header p {
     font-size: 1rem;
-
-    padding: 1rem 0;
-    margin-top: 1rem;
   }
 }
 </style>
