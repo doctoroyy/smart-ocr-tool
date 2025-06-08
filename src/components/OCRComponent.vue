@@ -99,9 +99,37 @@ const ocrResults = ref<OCRResult[]>([])
 const error = ref<string>('')
 const ocrModel = ref<any>(null)
 
+// 检查 WebGL 支持
+const checkWebGLSupport = () => {
+  try {
+    const canvas = document.createElement('canvas')
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl')
+    if (!gl) {
+      return false
+    }
+    
+    // 检查基本的 WebGL 功能
+    const renderer = gl.getParameter(gl.RENDERER)
+    const vendor = gl.getParameter(gl.VENDOR)
+    console.log('WebGL 支持检测:', { renderer, vendor })
+    
+    return true
+  } catch (e) {
+    console.error('WebGL 检测失败:', e)
+    return false
+  }
+}
+
 // 初始化 OCR 模型
 onMounted(async () => {
   try {
+    console.log('开始检查设备兼容性...')
+    
+    // 检查 WebGL 支持
+    if (!checkWebGLSupport()) {
+      throw new Error('您的设备不支持 WebGL，无法运行 OCR 模型。请使用支持 WebGL 的现代浏览器或设备。')
+    }
+    
     console.log('开始加载 PaddleOCR 模型...')
     // 动态导入 PaddleOCR 模块
     const ocr = await import('@paddle-js-models/ocr')
@@ -114,7 +142,13 @@ onMounted(async () => {
   } catch (err) {
     console.error('PaddleOCR 模型加载失败:', err)
     console.error('错误详情:', err.message || err)
-    error.value = `OCR 模型加载失败: ${err.message || err}，请检查网络连接并刷新页面重试`
+    
+    let errorMsg = err.message || err.toString()
+    if (errorMsg.includes('WebGL')) {
+      errorMsg = '您的设备不支持 WebGL 或 WebGL 功能异常。请尝试：\n1. 更新浏览器到最新版本\n2. 在设置中启用硬件加速\n3. 使用桌面版浏览器'
+    }
+    
+    error.value = `OCR 模型加载失败: ${errorMsg}`
     modelLoading.value = false
   }
 })
@@ -407,6 +441,8 @@ const copyAllText = async () => {
 .error-message {
   color: #d32f2f;
   margin: 0;
+  white-space: pre-line;
+  line-height: 1.6;
 }
 
 @media (max-width: 768px) {
