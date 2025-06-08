@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@paddle-js-models/ocr": "^4.1.1",
+    "tesseract.js": "^5.0.0",
     "vue": "^3.4.0"
   },
   "devDependencies": {

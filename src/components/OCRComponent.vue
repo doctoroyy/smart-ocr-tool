@@ -53,6 +53,9 @@
       <div v-if="modelLoading" class="model-loading">
         <p>⏳ 正在加载 OCR 模型，请稍候...</p>
       </div>
+      <div v-else-if="ocrModel" class="engine-info">
+        <p>{{ useNativeOCR ? '🔧 移动端兼容模式 (Tesseract.js)' : '⚡ 高性能模式 (PaddleOCR)' }}</p>
+      </div>
       <button
         @click="performOCR"
         :disabled="!selectedImage || loading || modelLoading"
@@ -98,6 +101,7 @@ const modelLoading = ref(true)
 const ocrResults = ref<OCRResult[]>([])
 const error = ref<string>('')
 const ocrModel = ref<any>(null)
+const useNativeOCR = ref(false)
 
 // 检查 WebGL 支持
 const checkWebGLSupport = () => {
@@ -120,35 +124,61 @@ const checkWebGLSupport = () => {
   }
 }
 
+// 检查是否支持原生 OCR API（实验性）
+const checkNativeOCRSupport = () => {
+  return 'createImageBitmap' in window && 'OffscreenCanvas' in window
+}
+
+// 使用 Tesseract.js 作为后备方案
+const initTesseractOCR = async () => {
+  try {
+    const Tesseract = await import('tesseract.js')
+    return Tesseract
+  } catch (e) {
+    console.error('Tesseract.js 加载失败:', e)
+    return null
+  }
+}
+
 // 初始化 OCR 模型
 onMounted(async () => {
   try {
     console.log('开始检查设备兼容性...')
     
-    // 检查 WebGL 支持
-    if (!checkWebGLSupport()) {
-      throw new Error('您的设备不支持 WebGL，无法运行 OCR 模型。请使用支持 WebGL 的现代浏览器或设备。')
+    // 首先尝试 PaddleOCR（需要 WebGL）
+    if (checkWebGLSupport()) {
+      try {
+        console.log('检测到 WebGL 支持，尝试加载 PaddleOCR...')
+        const ocr = await import('@paddle-js-models/ocr')
+        console.log('PaddleOCR 模块导入成功, 开始初始化...')
+        
+        await ocr.init()
+        ocrModel.value = ocr
+        useNativeOCR.value = false
+        modelLoading.value = false
+        console.log('PaddleOCR 模型加载成功')
+        return
+      } catch (paddleError) {
+        console.warn('PaddleOCR 加载失败，尝试备用方案:', paddleError)
+      }
     }
     
-    console.log('开始加载 PaddleOCR 模型...')
-    // 动态导入 PaddleOCR 模块
-    const ocr = await import('@paddle-js-models/ocr')
-    console.log('PaddleOCR 模块导入成功, 开始初始化...')
+    // 如果 PaddleOCR 失败，尝试 Tesseract.js（纯 JS，移动端友好）
+    console.log('尝试加载 Tesseract.js 作为备用方案...')
+    const tesseract = await initTesseractOCR()
+    if (tesseract) {
+      ocrModel.value = tesseract
+      useNativeOCR.value = true
+      modelLoading.value = false
+      console.log('Tesseract.js 加载成功（移动端兼容模式）')
+      return
+    }
     
-    await ocr.init()
-    ocrModel.value = ocr
-    modelLoading.value = false
-    console.log('PaddleOCR 模型加载成功')
+    throw new Error('无法加载任何 OCR 引擎')
+    
   } catch (err) {
-    console.error('PaddleOCR 模型加载失败:', err)
-    console.error('错误详情:', err.message || err)
-    
-    let errorMsg = err.message || err.toString()
-    if (errorMsg.includes('WebGL')) {
-      errorMsg = '您的设备不支持 WebGL 或 WebGL 功能异常。请尝试：\n1. 更新浏览器到最新版本\n2. 在设置中启用硬件加速\n3. 使用桌面版浏览器'
-    }
-    
-    error.value = `OCR 模型加载失败: ${errorMsg}`
+    console.error('OCR 初始化失败:', err)
+    error.value = `OCR 初始化失败: 您的设备可能不支持当前的 OCR 功能。\n建议使用最新版本的 Chrome、Safari 或 Firefox 浏览器。`
     modelLoading.value = false
   }
 })
@@ -219,30 +249,59 @@ const performOCR = async () => {
       img.src = selectedImage.value
     })
 
-    // 使用 PaddleOCR 进行文字识别
-    const results = await ocrModel.value.recognize(img)
+    let results
+    
+    if (useNativeOCR.value) {
+      // 使用 Tesseract.js
+      console.log('使用 Tesseract.js 进行识别...')
+      const worker = await ocrModel.value.createWorker('chi_sim+eng')
+      const { data } = await worker.recognize(img)
+      await worker.terminate()
+      
+      results = {
+        text: data.text.trim(),
+        confidence: data.confidence / 100,
+        words: data.words
+      }
+    } else {
+      // 使用 PaddleOCR
+      console.log('使用 PaddleOCR 进行识别...')
+      results = await ocrModel.value.recognize(img)
+    }
     
     console.log('OCR 识别原始结果:', results)
     
-    // 根据PaddleOCR文档，结果可能是 { text: string, points: array } 格式
+    // 处理不同 OCR 引擎的结果格式
     if (results) {
-      if (typeof results === 'object' && results.text) {
-        // 单个文本结果
-        ocrResults.value = [{
-          text: results.text,
-          confidence: 0.9,
-          bbox: results.points
-        }]
-      } else if (Array.isArray(results) && results.length > 0) {
-        // 多个文本结果
-        ocrResults.value = results.map((result: any) => ({
-          text: result.text || result.words || result.label || '',
-          confidence: result.confidence || result.score || 0.9,
-          bbox: result.bbox || result.location || result.points
-        }))
+      if (useNativeOCR.value) {
+        // Tesseract.js 结果格式
+        if (results.text && results.text.length > 0) {
+          ocrResults.value = [{
+            text: results.text,
+            confidence: results.confidence || 0.8,
+            bbox: null
+          }]
+        } else {
+          error.value = '未识别到文字内容'
+        }
       } else {
-        console.log('结果格式未知:', results)
-        error.value = '未识别到文字内容'
+        // PaddleOCR 结果格式
+        if (typeof results === 'object' && results.text) {
+          ocrResults.value = [{
+            text: results.text,
+            confidence: 0.9,
+            bbox: results.points
+          }]
+        } else if (Array.isArray(results) && results.length > 0) {
+          ocrResults.value = results.map((result: any) => ({
+            text: result.text || result.words || result.label || '',
+            confidence: result.confidence || result.score || 0.9,
+            bbox: result.bbox || result.location || result.points
+          }))
+        } else {
+          console.log('结果格式未知:', results)
+          error.value = '未识别到文字内容'
+        }
       }
     } else {
       error.value = '未识别到文字内容'
@@ -377,6 +436,16 @@ const copyAllText = async () => {
   background: #e3f2fd;
   border-radius: 6px;
   color: #1976d2;
+}
+
+.engine-info {
+  text-align: center;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  font-size: 0.9rem;
+  color: #666;
+  background: #f5f5f5;
+  border-radius: 4px;
 }
 
 .results-section {
