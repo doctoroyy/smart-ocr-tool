@@ -104,7 +104,7 @@ onMounted(async () => {
   try {
     console.log('开始加载 PaddleOCR 模型...')
     // 动态导入 PaddleOCR 模块
-    const ocr = await import('@paddlejs-models/ocr')
+    const ocr = await import('@paddle-js-models/ocr')
     console.log('PaddleOCR 模块导入成功, 开始初始化...')
     
     await ocr.init()
