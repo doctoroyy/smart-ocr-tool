@@ -50,13 +50,17 @@
     </div>
 
     <div class="action-section">
+      <div v-if="modelLoading" class="model-loading">
+        <p>⏳ 正在加载 OCR 模型，请稍候...</p>
+      </div>
       <button
         @click="performOCR"
-        :disabled="!selectedImage || loading"
+        :disabled="!selectedImage || loading || modelLoading"
         class="ocr-btn"
-        :class="{ loading }"
+        :class="{ loading, disabled: modelLoading }"
       >
         <span v-if="loading">识别中...</span>
+        <span v-else-if="modelLoading">模型加载中...</span>
         <span v-else>开始识别</span>
       </button>
     </div>
@@ -90,6 +94,7 @@ interface OCRResult {
 const fileInput = ref<HTMLInputElement>()
 const selectedImage = ref<string>('')
 const loading = ref(false)
+const modelLoading = ref(true)
 const ocrResults = ref<OCRResult[]>([])
 const error = ref<string>('')
 const ocrModel = ref<any>(null)
@@ -97,14 +102,20 @@ const ocrModel = ref<any>(null)
 // 初始化 OCR 模型
 onMounted(async () => {
   try {
+    console.log('开始加载 PaddleOCR 模型...')
     // 动态导入 PaddleOCR 模块
     const ocr = await import('@paddlejs-models/ocr')
+    console.log('PaddleOCR 模块导入成功, 开始初始化...')
+    
     await ocr.init()
     ocrModel.value = ocr
+    modelLoading.value = false
     console.log('PaddleOCR 模型加载成功')
   } catch (err) {
     console.error('PaddleOCR 模型加载失败:', err)
-    error.value = 'OCR 模型加载失败，请刷新页面重试'
+    console.error('错误详情:', err.message || err)
+    error.value = `OCR 模型加载失败: ${err.message || err}，请检查网络连接并刷新页面重试`
+    modelLoading.value = false
   }
 })
 
@@ -148,8 +159,14 @@ const clearImage = () => {
 }
 
 const performOCR = async () => {
-  if (!selectedImage.value || !ocrModel.value) {
-    error.value = 'OCR 模型未加载或未选择图片'
+  if (!selectedImage.value) {
+    error.value = '请先选择图片'
+    return
+  }
+  
+  if (!ocrModel.value) {
+    error.value = 'OCR 模型未加载，请等待模型加载完成或刷新页面重试'
+    console.log('OCR 模型状态:', ocrModel.value)
     return
   }
 
@@ -317,6 +334,15 @@ const copyAllText = async () => {
 
 .ocr-btn.loading {
   background: #ffa500;
+}
+
+.model-loading {
+  text-align: center;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: #e3f2fd;
+  border-radius: 6px;
+  color: #1976d2;
 }
 
 .results-section {
