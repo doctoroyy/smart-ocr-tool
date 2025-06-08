@@ -56,20 +56,20 @@
       <div v-else-if="ocrModel" class="engine-controls">
         <div class="engine-selector">
           <button 
-            @click="switchEngine('paddle')" 
-            :class="{ active: selectedEngine === 'paddle', disabled: !paddleOCRModel }"
-            :disabled="!paddleOCRModel"
-            class="engine-btn"
-          >
-            ⚡ PaddleOCR
-          </button>
-          <button 
             @click="switchEngine('tesseract')" 
             :class="{ active: selectedEngine === 'tesseract', disabled: !tesseractModel }"
             :disabled="!tesseractModel"
             class="engine-btn"
           >
             🔧 Tesseract.js
+          </button>
+          <button 
+            @click="switchEngine('paddle')" 
+            :class="{ active: selectedEngine === 'paddle', disabled: !paddleOCRModel }"
+            :disabled="!paddleOCRModel"
+            class="engine-btn"
+          >
+            ⚡ PaddleOCR
           </button>
         </div>
         <p class="engine-description">{{ getEngineDescription() }}</p>
@@ -79,15 +79,10 @@
       <div v-if="loading" class="progress-section">
         <div class="progress-header">
           <h4>{{ progressStatus }}</h4>
-          <span class="progress-percent">{{ progress }}%</span>
+          <span class="progress-percent">{{ progress.toFixed(2) }}%</span>
         </div>
         <div class="progress-bar">
           <div class="progress-fill" :style="{ width: progress + '%' }"></div>
-        </div>
-        <div class="progress-details">
-          <div v-for="(step, index) in detailedProgress" :key="index" class="progress-step">
-            ✓ {{ step }}
-          </div>
         </div>
       </div>
 
@@ -104,48 +99,20 @@
     </div>
 
     <div v-if="ocrResults.length > 0" class="results-section">
-      <div class="results-header">
-        <h3>识别结果</h3>
-        <div class="results-stats">
-          <span class="text-count">共 {{ ocrResults.length }} 条文本</span>
-          <span class="avg-confidence">平均置信度: {{ getAverageConfidence() }}%</span>
-        </div>
-      </div>
-      
-      <div class="results-container">
-        <div v-for="(result, index) in ocrResults" :key="index" class="result-item">
-          <div class="result-header">
-            <span class="result-index">#{{ index + 1 }}</span>
-            <span class="result-confidence" :class="getConfidenceClass(result.confidence)">
-              {{ (result.confidence * 100).toFixed(1) }}%
-            </span>
-            <button @click="copyText(result.text)" class="copy-single-btn" title="复制此条文本">
-              📋
-            </button>
-          </div>
-          <div class="result-content">
-            <p class="result-text" @click="selectText($event)">{{ result.text }}</p>
-          </div>
-        </div>
-      </div>
-      
-      <!-- 整理后文本预览 -->
+      <!-- 识别结果 -->
       <div class="clean-text-preview">
-        <h4>整理后文本预览:</h4>
+        <h4>识别结果:</h4>
         <div class="clean-text-content">
           <pre>{{ getCleanText() }}</pre>
         </div>
       </div>
 
       <div class="results-actions">
-        <button @click="copyAllText" class="action-btn primary">
-          📄 复制原始文字
-        </button>
         <button @click="copyCleanText" class="action-btn primary">
-          📋 复制整理后文本
+          📋 复制文本
         </button>
         <button @click="downloadText" class="action-btn secondary">
-          💾 下载为文本文件
+          💾 下载文本文件
         </button>
       </div>
     </div>
@@ -173,13 +140,15 @@ const ocrResults = ref<OCRResult[]>([])
 const error = ref<string>('')
 const progress = ref(0)
 const progressStatus = ref('')
-const detailedProgress = ref<string[]>([])
 const ocrModel = ref<any>(null)
+
+// 简单的换行间距配置
+const spaceAfterLines = ref(['合计', '说明', '收款人', '复核人'])
 const useNativeOCR = ref(false)
 const paddleOCRModel = ref<any>(null)
 const tesseractModel = ref<any>(null)
 const manualEngineSelection = ref(false)
-const selectedEngine = ref<string>('paddle')
+const selectedEngine = ref<string>('tesseract')
 
 // 检查 WebGL 支持
 const checkWebGLSupport = () => {
@@ -219,8 +188,27 @@ const initTesseractOCR = async () => {
 }
 
 // 切换 OCR 引擎
-const switchEngine = (engine: string) => {
-  if (engine === 'paddle' && paddleOCRModel.value) {
+const switchEngine = async (engine: string) => {
+  if (engine === 'paddle') {
+    if (!paddleOCRModel.value) {
+      // 需要先加载 PaddleOCR
+      if (!checkWebGLSupport()) {
+        error.value = '您的设备不支持 WebGL，无法使用 PaddleOCR。请使用 Tesseract.js。'
+        return
+      }
+      
+      try {
+        modelLoading.value = true
+        error.value = ''
+        await loadPaddleOCR()
+      } catch (err) {
+        error.value = 'PaddleOCR 加载失败，请继续使用 Tesseract.js'
+        return
+      } finally {
+        modelLoading.value = false
+      }
+    }
+    
     selectedEngine.value = 'paddle'
     ocrModel.value = paddleOCRModel.value
     useNativeOCR.value = false
@@ -245,64 +233,41 @@ const getEngineDescription = () => {
   return ''
 }
 
-// 初始化 OCR 模型
+// 按需加载 PaddleOCR
+const loadPaddleOCR = async () => {
+  if (paddleOCRModel.value) return // 已经加载过了
+  
+  try {
+    console.log('按需加载 PaddleOCR...')
+    const ocr = await import('@paddle-js-models/ocr')
+    await ocr.init()
+    paddleOCRModel.value = ocr
+    console.log('PaddleOCR 加载成功')
+  } catch (err) {
+    console.warn('PaddleOCR 加载失败:', err)
+    throw err
+  }
+}
+
+// 初始化 OCR 模型 - 默认只加载 Tesseract.js
 onMounted(async () => {
   try {
-    console.log('开始加载 OCR 引擎...')
+    console.log('开始加载默认 OCR 引擎...')
     
-    // 并行加载两个引擎
-    const loadEngines = []
-    
-    // 尝试加载 PaddleOCR
-    if (checkWebGLSupport()) {
-      loadEngines.push(
-        (async () => {
-          try {
-            console.log('检测到 WebGL 支持，尝试加载 PaddleOCR...')
-            const ocr = await import('@paddle-js-models/ocr')
-            console.log('PaddleOCR 模块导入成功, 开始初始化...')
-            await ocr.init()
-            paddleOCRModel.value = ocr
-            console.log('PaddleOCR 模型加载成功')
-          } catch (paddleError) {
-            console.warn('PaddleOCR 加载失败:', paddleError)
-          }
-        })()
-      )
-    }
-    
-    // 尝试加载 Tesseract.js
-    loadEngines.push(
-      (async () => {
-        try {
-          console.log('尝试加载 Tesseract.js...')
-          const tesseract = await initTesseractOCR()
-          if (tesseract) {
-            tesseractModel.value = tesseract
-            console.log('Tesseract.js 加载成功')
-          }
-        } catch (tesseractError) {
-          console.warn('Tesseract.js 加载失败:', tesseractError)
-        }
-      })()
-    )
-    
-    // 等待所有引擎加载完成
-    await Promise.all(loadEngines)
-    
-    // 设置默认引擎
-    if (paddleOCRModel.value) {
-      selectedEngine.value = 'paddle'
-      ocrModel.value = paddleOCRModel.value
-      useNativeOCR.value = false
-      console.log('默认使用 PaddleOCR 引擎')
-    } else if (tesseractModel.value) {
-      selectedEngine.value = 'tesseract'
-      ocrModel.value = tesseractModel.value
-      useNativeOCR.value = true
-      console.log('默认使用 Tesseract.js 引擎')
-    } else {
-      throw new Error('无法加载任何 OCR 引擎')
+    // 只加载 Tesseract.js
+    try {
+      console.log('加载 Tesseract.js...')
+      const tesseract = await initTesseractOCR()
+      if (tesseract) {
+        tesseractModel.value = tesseract
+        selectedEngine.value = 'tesseract'
+        ocrModel.value = tesseractModel.value
+        useNativeOCR.value = true
+        console.log('Tesseract.js 加载成功，设为默认引擎')
+      }
+    } catch (tesseractError) {
+      console.warn('Tesseract.js 加载失败:', tesseractError)
+      throw new Error('默认 OCR 引擎加载失败')
     }
     
   } catch (err) {
@@ -353,18 +318,15 @@ const clearImage = () => {
 }
 
 // 更新进度
-const updateProgress = (percent: number, status: string, step?: string) => {
-  progress.value = Math.max(0, Math.min(100, percent))
+const updateProgress = (percent: number, status: string) => {
+  progress.value = Math.max(0, Math.min(100, Math.round(percent * 100) / 100))
   progressStatus.value = status
-  if (step) {
-    detailedProgress.value.push(step)
-  }
 }
 
 // Tesseract.js 引擎处理函数
 const performTesseractOCR = async (img: HTMLImageElement) => {
   console.log('使用 Tesseract.js 进行识别...')
-  updateProgress(10, '准备图像处理', '开始使用 Tesseract.js 引擎')
+  updateProgress(5, '准备图像处理')
   
   // 智能图像预处理
   const canvas = document.createElement('canvas')
@@ -375,7 +337,7 @@ const performTesseractOCR = async (img: HTMLImageElement) => {
   canvas.width = img.width * scale
   canvas.height = img.height * scale
   
-  updateProgress(20, '图像预处理中', '放大图像以提高识别精度')
+  updateProgress(15, '图像预处理中')
   
   // 使用高质量缩放
   ctx.imageSmoothingEnabled = true
@@ -384,112 +346,83 @@ const performTesseractOCR = async (img: HTMLImageElement) => {
   
   // 轻度图像增强
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  const data = imageData.data
+  const pixelData = imageData.data
   
-  updateProgress(30, '图像优化中', '增强图像对比度和清晰度')
+  updateProgress(25, '图像增强处理')
   
   // 轻度对比度增强，保持细节
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i]
-    const g = data[i + 1]
-    const b = data[i + 2]
+  for (let i = 0; i < pixelData.length; i += 4) {
+    const r = pixelData[i]
+    const g = pixelData[i + 1]
+    const b = pixelData[i + 2]
     
     // 轻度对比度增强
     const factor = 1.2
-    data[i] = Math.min(255, r * factor)
-    data[i + 1] = Math.min(255, g * factor)
-    data[i + 2] = Math.min(255, b * factor)
+    pixelData[i] = Math.min(255, r * factor)
+    pixelData[i + 1] = Math.min(255, g * factor)
+    pixelData[i + 2] = Math.min(255, b * factor)
   }
   
   ctx.putImageData(imageData, 0, 0)
   
-  updateProgress(40, '初始化识别引擎', '创建 Tesseract 工作进程')
+  updateProgress(35, '初始化识别引擎')
   
   const worker = await ocrModel.value.createWorker('chi_sim+eng', 1, {
-    logger: m => console.log('Tesseract:', m)
-  })
-  
-  updateProgress(50, '配置识别参数', '设置中英文识别和优化参数')
-  
-  // 优化的 OCR 参数设置
-  await worker.setParameters({
-    tessedit_char_whitelist: '', // 允许所有字符
-    tessedit_pageseg_mode: ocrModel.value.PSM.AUTO, // 自动页面分割
-    tessedit_ocr_engine_mode: ocrModel.value.OEM.LSTM_ONLY, // LSTM 引擎
-    preserve_interword_spaces: '1', // 保留空格
-    user_defined_dpi: '300', // 高 DPI
-    tessedit_create_hocr: '1',
-    tessedit_write_images: '0',
-    classify_enable_learning: '1', // 启用学习
-    classify_enable_adaptive_matcher: '1',
-    textord_really_old_xheight: '0', // 使用新的字符高度检测
-    textord_min_xheight: '8',
-    tessedit_reject_mode: '2', // 适度拒绝模式
-    // 启用所有词典以提高准确率
-    load_system_dawg: '1',
-    load_freq_dawg: '1', 
-    load_unambig_dawg: '1',
-    load_punc_dawg: '1',
-    load_number_dawg: '1',
-    load_bigram_dawg: '1',
-    // 中文优化参数
-    chop_enable: '1', // 启用字符切分
-    wordrec_enable_assoc: '1', // 启用联想识别
-    segment_penalty_dict_nonword: '1.25', // 调整非词典词汇的惩罚
-    segment_penalty_garbage: '1.50', // 调整垃圾字符的惩罚
-  })
-  
-  updateProgress(60, '开始文字识别', '分析图像中的文字内容')
-  
-  // 多次识别策略：尝试不同的页面分割模式
-  const recognitionAttempts = [
-    { psm: ocrModel.value.PSM.AUTO, name: 'AUTO' },
-    { psm: ocrModel.value.PSM.SINGLE_BLOCK, name: 'SINGLE_BLOCK' },
-    { psm: ocrModel.value.PSM.SINGLE_COLUMN, name: 'SINGLE_COLUMN' }
-  ]
-  
-  let bestResult = null
-  let bestConfidence = 0
-  const progressStep = 25 / recognitionAttempts.length
-  
-  for (let i = 0; i < recognitionAttempts.length; i++) {
-    const attempt = recognitionAttempts[i]
-    try {
-      console.log(`尝试 ${attempt.name} 模式识别...`)
-      updateProgress(60 + (i + 1) * progressStep, `识别模式 ${i + 1}/3`, `尝试 ${attempt.name} 识别模式`)
-      
-      await worker.setParameters({
-        tessedit_pageseg_mode: attempt.psm
-      })
-      
-      const { data } = await worker.recognize(canvas)
-      const confidence = data.confidence / 100
-      
-      console.log(`${attempt.name} 模式置信度: ${(confidence * 100).toFixed(1)}%`)
-      
-      if (confidence > bestConfidence && data.text.trim().length > 0) {
-        bestConfidence = confidence
-        bestResult = {
-          text: data.text.trim(),
-          confidence: confidence,
-          words: data.words,
-          mode: attempt.name
-        }
+    logger: (m) => {
+      console.log('Tesseract:', m)
+      // 根据 Tesseract 的日志更新进度
+      if (m.status === 'recognizing text' && typeof m.progress === 'number') {
+        const currentProgress = 50 + m.progress * 40 // 50% 到 90% 的范围
+        updateProgress(currentProgress, '文字识别中')
       }
-    } catch (err) {
-      console.warn(`${attempt.name} 模式识别失败:`, err)
     }
+  })
+  
+  updateProgress(45, '配置识别参数')
+  
+  // 针对中文票据优化的 OCR 参数
+  await worker.setParameters({
+    tessedit_pageseg_mode: ocrModel.value.PSM.AUTO,
+    tessedit_ocr_engine_mode: ocrModel.value.OEM.LSTM_ONLY,
+    preserve_interword_spaces: '1',
+    user_defined_dpi: '300',
+    // 提高识别质量的关键参数
+    tessedit_reject_mode: '0', // 减少拒绝，接受更多候选结果
+    classify_enable_learning: '1',
+    classify_enable_adaptive_matcher: '1',
+    // 文本行检测优化
+    textord_debug_tabfind: '0',
+    textord_tabfind_force_vertical_text: '0',
+    textord_tabfind_vertical_text_ratio: '0.5',
+    // 字符识别优化
+    tessedit_char_blacklist: '', // 不排除任何字符
+    tessedit_char_whitelist: '', // 允许所有字符
+    // 置信度阈值调整
+    tessedit_reject_row_percent: '40', // 放宽行拒绝阈值
+    tessedit_reject_block_percent: '45', // 放宽块拒绝阈值
+  })
+  
+  updateProgress(50, '开始文字识别')
+  
+  const { data: ocrData } = await worker.recognize(canvas)
+  
+  updateProgress(95, '处理识别结果')
+  
+  const result = {
+    text: ocrData.text.trim(),
+    confidence: ocrData.confidence / 100,
+    words: ocrData.words
   }
   
-  updateProgress(90, '处理识别结果', '清理工作进程')
+  console.log(`OCR 识别完成，置信度: ${(result.confidence * 100).toFixed(2)}%`)
+  
   await worker.terminate()
   
-  if (bestResult) {
-    updateProgress(100, '识别完成', `使用 ${bestResult.mode} 模式，置信度 ${(bestResult.confidence * 100).toFixed(1)}%`)
-    console.log(`最佳识别结果来自 ${bestResult.mode} 模式，置信度: ${(bestResult.confidence * 100).toFixed(1)}%`)
-    return bestResult
+  if (result.text && result.text.length > 0) {
+    updateProgress(100, '识别完成')
+    return result
   } else {
-    throw new Error('所有识别模式都失败了')
+    throw new Error('OCR 识别失败，未检测到文字内容')
   }
 }
 
@@ -566,9 +499,8 @@ const performOCR = async () => {
   ocrResults.value = []
   progress.value = 0
   progressStatus.value = ''
-  detailedProgress.value = []
   
-  updateProgress(5, '准备开始识别', '初始化OCR识别流程')
+  updateProgress(5, '准备开始识别')
 
   try {
     // 创建 Image 对象用于 OCR 识别
@@ -607,176 +539,68 @@ const performOCR = async () => {
   }
 }
 
-// 计算平均置信度
-const getAverageConfidence = () => {
-  if (ocrResults.value.length === 0) return 0
-  const total = ocrResults.value.reduce((sum, result) => sum + result.confidence, 0)
-  return ((total / ocrResults.value.length) * 100).toFixed(1)
+
+// 智能文本清理
+const basicTextClean = (text: string): string => {
+  return text
+    // 移除明显的乱码字符
+    .replace(/[£€¥§¢©®™°±÷×µ¶]/g, '')
+    .replace(/[\u2600-\u26FF\u2700-\u27BF]/g, '') // 移除符号
+    .replace(/[^\u4e00-\u9fff\u3400-\u4dbf\w\s\d.,，。:：；;()（）\-+=/\\]/g, ' ') // 只保留中文、英文、数字和基本标点
+    
+    // 修正常见OCR错误
+    .replace(/[oO](?=\d)/g, '0')
+    .replace(/[lI](?=\d)/g, '1') 
+    .replace(/(\d)[lI]/g, '$11')
+    .replace(/(\d)[oO]/g, '$10')
+    .replace(/[，,](?=\d)/g, '.')
+    
+    // 修正标点符号
+    .replace(/\s*[:：]\s*/g, ': ')
+    .replace(/\s*[,，]\s*/g, ', ')
+    .replace(/\s*[;；]\s*/g, '; ')
+    
+    // 清理多余空格和换行
+    .replace(/\s+/g, ' ')
+    .replace(/\n\s*\n/g, '\n')
+    .trim()
 }
 
-// 根据置信度返回样式类
-const getConfidenceClass = (confidence: number) => {
-  const percent = confidence * 100
-  if (percent >= 80) return 'confidence-high'
-  if (percent >= 60) return 'confidence-medium'
-  return 'confidence-low'
-}
-
-// 选中文本
-const selectText = (event: Event) => {
-  const target = event.target as HTMLElement
-  const range = document.createRange()
-  range.selectNodeContents(target)
-  const selection = window.getSelection()
-  selection?.removeAllRanges()
-  selection?.addRange(range)
-}
-
-// 复制单条文本
-const copyText = async (text: string) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    console.log('文字已复制到剪贴板')
-    // 可以添加toast提示
-  } catch (err) {
-    console.error('复制失败:', err)
-  }
-}
-
-// 复制全部文字
-const copyAllText = async () => {
-  const allText = ocrResults.value.map(result => result.text).join('\n')
-  try {
-    await navigator.clipboard.writeText(allText)
-    console.log('全部文字已复制到剪贴板')
-  } catch (err) {
-    console.error('复制失败:', err)
-  }
-}
-
-// 清理和整理文本
+// 智能文本整理
 const cleanAndFormatText = (textArray: string[]): string => {
-  // 合并所有文本，保持原有的行结构
-  const combinedText = textArray.join('\n')
+  // 逐行清理并过滤无效行
+  const cleanedLines = textArray
+    .map(text => basicTextClean(text))
+    .filter(line => {
+      // 过滤掉太短或明显无意义的行
+      if (line.length < 2) return false
+      // 过滤掉只有符号的行
+      if (/^[\s\W]*$/.test(line) && !/[\u4e00-\u9fff\d]/.test(line)) return false
+      // 过滤掉明显的乱码行（连续的无意义字符）
+      if (/[\w]{10,}/.test(line) && !/[\u4e00-\u9fff]/.test(line)) return false
+      return true
+    })
   
-  // 按行处理
-  const lines = combinedText.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+  // 智能分组和格式化
   const formattedLines: string[] = []
   
-  for (let line of lines) {
-    // 基本文本清理
-    line = line
-      // 修正常见OCR错误
-      .replace(/[oO](?=\d)/g, '0') // o或O后跟数字时替换为0
-      .replace(/[lI](?=\d)/g, '1') // l或I后跟数字时替换为1
-      .replace(/(\d)[lI]/g, '$11') // 数字后的l或I替换为1
-      .replace(/(\d)[oO]/g, '$10') // 数字后的o或O替换为0
-      // 修正标点符号
-      .replace(/\s*[:：]\s*/g, ': ')
-      .replace(/\s*[,，]\s*/g, ', ')
-      .replace(/\s+/g, ' ')
-      .trim()
+  for (let i = 0; i < cleanedLines.length; i++) {
+    const line = cleanedLines[i]
     
-    if (line.length === 0) continue
+    // 检查是否是重要分隔符
+    const isImportantSection = /^(项目名|医疗机构|业务流水号|门诊号|就诊日期)/.test(line)
+    const needSpaceBefore = spaceAfterLines.value.some(keyword => 
+      i > 0 && cleanedLines[i - 1].includes(keyword)
+    )
     
-    // 检测标题行（医疗票据相关）
-    if (line.includes('广东省') && line.includes('票据')) {
-      formattedLines.push(line)
+    if ((needSpaceBefore || isImportantSection) && formattedLines.length > 0) {
       formattedLines.push('')
-      continue
     }
     
-    // 检测代码/编号行
-    if (line.includes('代码') || line.includes('编号') || line.includes('统一社会信用代码')) {
-      formattedLines.push(line)
-      formattedLines.push('')
-      continue
-    }
-    
-    // 检测人员信息
-    if (line.includes('发票人') || line.includes('收款人') || line.includes('复核人')) {
-      formattedLines.push(line)
-      formattedLines.push('')
-      continue
-    }
-    
-    // 检测表格标题行（项目名称等）
-    if (line.includes('项目名称') && line.includes('金额')) {
-      formattedLines.push('')
-      formattedLines.push(line)
-      continue
-    }
-    
-    // 检测金额合计
-    if (line.includes('金额合计') || line.includes('大写') || line.includes('小写')) {
-      if (!formattedLines[formattedLines.length - 1]?.includes('合计')) {
-        formattedLines.push('')
-      }
-      formattedLines.push(line)
-      continue
-    }
-    
-    // 检测业务信息
-    if (line.includes('业务流水号') || line.includes('门诊号') || line.includes('就诊日期')) {
-      if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
-        formattedLines.push('')
-      }
-      formattedLines.push(line)
-      continue
-    }
-    
-    // 检测医保信息表格
-    if (line.includes('项目') && line.includes('内容')) {
-      formattedLines.push('')
-      formattedLines.push('')
-      formattedLines.push(line)
-      continue
-    }
-    
-    // 检测收款单位
-    if (line.includes('收款单位') || line.includes('卫生服务中心')) {
-      formattedLines.push('')
-      formattedLines.push(line)
-      formattedLines.push('')
-      continue
-    }
-    
-    // 检测说明部分
-    if (line.includes('说明') && line.length < 10) {
-      formattedLines.push('')
-      formattedLines.push(line)
-      formattedLines.push('')
-      continue
-    }
-    
-    // 检测日期
-    if (/\d{4}[-年]\d{1,2}[-月]\d{1,2}[日]?/.test(line)) {
-      formattedLines.push('')
-      formattedLines.push(line)
-      continue
-    }
-    
-    // 普通内容行
     formattedLines.push(line)
   }
   
-  // 清理多余的空行
-  const finalLines = []
-  let lastWasEmpty = false
-  
-  for (const line of formattedLines) {
-    if (line === '') {
-      if (!lastWasEmpty) {
-        finalLines.push(line)
-        lastWasEmpty = true
-      }
-    } else {
-      finalLines.push(line)
-      lastWasEmpty = false
-    }
-  }
-  
-  return finalLines.join('\n').trim()
+  return formattedLines.join('\n')
 }
 
 // 获取整理后的文本（用于预览）
@@ -785,6 +609,7 @@ const getCleanText = () => {
   const textArray = ocrResults.value.map(result => result.text)
   return cleanAndFormatText(textArray)
 }
+
 
 // 复制整理后的文本
 const copyCleanText = async () => {
@@ -800,8 +625,8 @@ const copyCleanText = async () => {
 
 // 下载文本文件
 const downloadText = () => {
-  const allText = ocrResults.value.map(result => result.text).join('\n')
-  const blob = new Blob([allText], { type: 'text/plain;charset=utf-8' })
+  const cleanedText = getCleanText()
+  const blob = new Blob([cleanedText], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -1254,10 +1079,55 @@ const downloadText = () => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  transition: all 0.3s ease;
 }
 
 .progress-step:last-child {
   border-bottom: none;
+}
+
+.step-icon {
+  min-width: 20px;
+  text-align: center;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+}
+
+.step-icon.completed {
+  color: #28a745;
+}
+
+.step-icon.current {
+  color: #42b883;
+  animation: pulse 1.5s infinite;
+}
+
+.step-text {
+  flex: 1;
+  transition: color 0.3s ease;
+}
+
+.step-progress {
+  font-size: 0.8rem;
+  color: #42b883;
+  font-weight: 600;
+  min-width: 45px;
+  text-align: right;
+}
+
+.progress-step .step-icon.completed + .step-text {
+  color: #28a745;
+}
+
+.progress-step .step-icon.current + .step-text {
+  color: #42b883;
+  font-weight: 500;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
 }
 
 .error-section {
