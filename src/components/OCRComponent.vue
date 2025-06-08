@@ -328,6 +328,33 @@ const performOCR = async () => {
     if (useNativeOCR.value) {
       // 使用 Tesseract.js
       console.log('使用 Tesseract.js 进行识别...')
+      
+      // 图像预处理：增强对比度和清晰度
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      canvas.width = img.width
+      canvas.height = img.height
+      
+      // 绘制原图
+      ctx.drawImage(img, 0, 0)
+      
+      // 获取图像数据进行预处理
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const data = imageData.data
+      
+      // 增强对比度和去噪
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
+        // 二值化处理，提高文字识别率
+        const threshold = 128
+        const newValue = gray > threshold ? 255 : 0
+        data[i] = newValue     // R
+        data[i + 1] = newValue // G
+        data[i + 2] = newValue // B
+      }
+      
+      ctx.putImageData(imageData, 0, 0)
+      
       const worker = await ocrModel.value.createWorker('chi_sim+eng', 1, {
         logger: m => console.log('Tesseract:', m)
       })
@@ -335,20 +362,38 @@ const performOCR = async () => {
       // 设置更高精度的 OCR 参数
       await worker.setParameters({
         tessedit_char_whitelist: '', // 移除字符限制
-        tessedit_pageseg_mode: ocrModel.value.PSM.AUTO, // 自动页面分割
-        tessedit_ocr_engine_mode: ocrModel.value.OEM.LSTM_ONLY, // 使用最新的 LSTM 引擎
+        tessedit_pageseg_mode: ocrModel.value.PSM.SINGLE_BLOCK, // 单块文本模式，适合票据
+        tessedit_ocr_engine_mode: ocrModel.value.OEM.LSTM_ONLY, // 使用 LSTM 引擎
         preserve_interword_spaces: '1', // 保留词间空格
         user_defined_dpi: '300', // 设置更高 DPI
-        tessedit_create_hocr: '1', // 创建 hOCR 输出以获得更好的结果
+        tessedit_create_hocr: '1', // 创建 hOCR 输出
+        tessedit_write_images: '0', // 不输出中间图像
+        classify_enable_learning: '0', // 禁用学习模式提高稳定性
+        classify_enable_adaptive_matcher: '1', // 启用自适应匹配
+        textord_really_old_xheight: '1', // 改善字符高度检测
+        textord_min_xheight: '10', // 最小字符高度
+        tessedit_reject_mode: '0', // 减少拒绝率
+        load_system_dawg: '0', // 禁用系统词典，提高中文识别
+        load_freq_dawg: '0', // 禁用频率词典
+        load_unambig_dawg: '0', // 禁用无歧义词典
+        load_punc_dawg: '0', // 禁用标点词典
+        load_number_dawg: '1', // 启用数字词典，票据有很多数字
+        load_bigram_dawg: '0', // 禁用双字母词典
       })
       
-      const { data } = await worker.recognize(img)
+      // 使用预处理后的图像进行识别
+      const { data: ocrData } = await worker.recognize(canvas)
       await worker.terminate()
       
+      // 后处理：清理识别结果
+      let cleanedText = ocrData.text.trim()
+      // 移除多余的空行和空格
+      cleanedText = cleanedText.replace(/\n\s*\n/g, '\n').replace(/\s+/g, ' ')
+      
       results = {
-        text: data.text.trim(),
-        confidence: data.confidence / 100,
-        words: data.words
+        text: cleanedText,
+        confidence: ocrData.confidence / 100,
+        words: ocrData.words
       }
     } else {
       // 使用 PaddleOCR
@@ -363,11 +408,22 @@ const performOCR = async () => {
       if (useNativeOCR.value) {
         // Tesseract.js 结果格式
         if (results.text && results.text.length > 0) {
-          ocrResults.value = [{
-            text: results.text,
-            confidence: results.confidence || 0.8,
-            bbox: null
-          }]
+          // 将文本按行分割，每行作为一个结果项
+          const lines = results.text.split('\n').filter(line => line.trim().length > 0)
+          
+          if (lines.length > 0) {
+            ocrResults.value = lines.map((line: string, index: number) => ({
+              text: line.trim(),
+              confidence: results.confidence || 0.8,
+              bbox: null
+            }))
+          } else {
+            ocrResults.value = [{
+              text: results.text,
+              confidence: results.confidence || 0.8,
+              bbox: null
+            }]
+          }
         } else {
           error.value = '未识别到文字内容'
         }
