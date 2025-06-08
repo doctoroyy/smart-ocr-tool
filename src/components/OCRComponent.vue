@@ -129,12 +129,20 @@
         </div>
       </div>
       
+      <!-- 整理后文本预览 -->
+      <div class="clean-text-preview">
+        <h4>整理后文本预览:</h4>
+        <div class="clean-text-content">
+          <pre>{{ getCleanText() }}</pre>
+        </div>
+      </div>
+
       <div class="results-actions">
         <button @click="copyAllText" class="action-btn primary">
-          📄 复制全部文字
+          📄 复制原始文字
         </button>
-        <button @click="copyFormattedText" class="action-btn secondary">
-          📋 复制格式化文本
+        <button @click="copyCleanText" class="action-btn primary">
+          📋 复制整理后文本
         </button>
         <button @click="downloadText" class="action-btn secondary">
           💾 下载为文本文件
@@ -646,17 +654,145 @@ const copyAllText = async () => {
   }
 }
 
-// 复制格式化文本（带序号和置信度）
-const copyFormattedText = async () => {
-  const formattedText = ocrResults.value
-    .map((result, index) => {
-      return `${index + 1}. ${result.text} (置信度: ${(result.confidence * 100).toFixed(1)}%)`
-    })
-    .join('\n')
+// 清理和整理文本
+const cleanAndFormatText = (textArray: string[]): string => {
+  // 合并所有文本，保持原有的行结构
+  const combinedText = textArray.join('\n')
+  
+  // 按行处理
+  const lines = combinedText.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+  const formattedLines: string[] = []
+  
+  for (let line of lines) {
+    // 基本文本清理
+    line = line
+      // 修正常见OCR错误
+      .replace(/[oO](?=\d)/g, '0') // o或O后跟数字时替换为0
+      .replace(/[lI](?=\d)/g, '1') // l或I后跟数字时替换为1
+      .replace(/(\d)[lI]/g, '$11') // 数字后的l或I替换为1
+      .replace(/(\d)[oO]/g, '$10') // 数字后的o或O替换为0
+      // 修正标点符号
+      .replace(/\s*[:：]\s*/g, ': ')
+      .replace(/\s*[,，]\s*/g, ', ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    
+    if (line.length === 0) continue
+    
+    // 检测标题行（医疗票据相关）
+    if (line.includes('广东省') && line.includes('票据')) {
+      formattedLines.push(line)
+      formattedLines.push('')
+      continue
+    }
+    
+    // 检测代码/编号行
+    if (line.includes('代码') || line.includes('编号') || line.includes('统一社会信用代码')) {
+      formattedLines.push(line)
+      formattedLines.push('')
+      continue
+    }
+    
+    // 检测人员信息
+    if (line.includes('发票人') || line.includes('收款人') || line.includes('复核人')) {
+      formattedLines.push(line)
+      formattedLines.push('')
+      continue
+    }
+    
+    // 检测表格标题行（项目名称等）
+    if (line.includes('项目名称') && line.includes('金额')) {
+      formattedLines.push('')
+      formattedLines.push(line)
+      continue
+    }
+    
+    // 检测金额合计
+    if (line.includes('金额合计') || line.includes('大写') || line.includes('小写')) {
+      if (!formattedLines[formattedLines.length - 1]?.includes('合计')) {
+        formattedLines.push('')
+      }
+      formattedLines.push(line)
+      continue
+    }
+    
+    // 检测业务信息
+    if (line.includes('业务流水号') || line.includes('门诊号') || line.includes('就诊日期')) {
+      if (formattedLines.length > 0 && formattedLines[formattedLines.length - 1] !== '') {
+        formattedLines.push('')
+      }
+      formattedLines.push(line)
+      continue
+    }
+    
+    // 检测医保信息表格
+    if (line.includes('项目') && line.includes('内容')) {
+      formattedLines.push('')
+      formattedLines.push('')
+      formattedLines.push(line)
+      continue
+    }
+    
+    // 检测收款单位
+    if (line.includes('收款单位') || line.includes('卫生服务中心')) {
+      formattedLines.push('')
+      formattedLines.push(line)
+      formattedLines.push('')
+      continue
+    }
+    
+    // 检测说明部分
+    if (line.includes('说明') && line.length < 10) {
+      formattedLines.push('')
+      formattedLines.push(line)
+      formattedLines.push('')
+      continue
+    }
+    
+    // 检测日期
+    if (/\d{4}[-年]\d{1,2}[-月]\d{1,2}[日]?/.test(line)) {
+      formattedLines.push('')
+      formattedLines.push(line)
+      continue
+    }
+    
+    // 普通内容行
+    formattedLines.push(line)
+  }
+  
+  // 清理多余的空行
+  const finalLines = []
+  let lastWasEmpty = false
+  
+  for (const line of formattedLines) {
+    if (line === '') {
+      if (!lastWasEmpty) {
+        finalLines.push(line)
+        lastWasEmpty = true
+      }
+    } else {
+      finalLines.push(line)
+      lastWasEmpty = false
+    }
+  }
+  
+  return finalLines.join('\n').trim()
+}
+
+// 获取整理后的文本（用于预览）
+const getCleanText = () => {
+  if (ocrResults.value.length === 0) return ''
+  const textArray = ocrResults.value.map(result => result.text)
+  return cleanAndFormatText(textArray)
+}
+
+// 复制整理后的文本
+const copyCleanText = async () => {
+  const cleanedText = getCleanText()
   
   try {
-    await navigator.clipboard.writeText(formattedText)
-    console.log('格式化文字已复制到剪贴板')
+    await navigator.clipboard.writeText(cleanedText)
+    console.log('整理后文字已复制到剪贴板')
   } catch (err) {
     console.error('复制失败:', err)
   }
@@ -1009,6 +1145,39 @@ const downloadText = () => {
   background: #f8f9fa;
   border-color: #42b883;
   color: #42b883;
+}
+
+.clean-text-preview {
+  background: white;
+  border-radius: 6px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #e0e0e0;
+}
+
+.clean-text-preview h4 {
+  margin: 0 0 1rem 0;
+  color: #333;
+  font-size: 1rem;
+}
+
+.clean-text-content {
+  background: #f8f9fa;
+  border-radius: 4px;
+  padding: 1rem;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #e0e0e0;
+}
+
+.clean-text-content pre {
+  margin: 0;
+  font-family: 'Courier New', Monaco, monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 .progress-section {
