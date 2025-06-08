@@ -465,20 +465,40 @@ const processTesseractResults = (results: any) => {
 
 // 处理 PaddleOCR 识别结果
 const processPaddleResults = (results: any) => {
-  if (typeof results === 'object' && results.text) {
-    return [{
-      text: results.text,
-      confidence: 0.9,
-      bbox: results.points
-    }]
-  } else if (Array.isArray(results) && results.length > 0) {
-    return results.map((result: any) => ({
-      text: result.text || result.words || result.label || '',
-      confidence: result.confidence || result.score || 0.9,
-      bbox: result.bbox || result.location || result.points
-    }))
+  console.log('处理 PaddleOCR 结果:', results)
+  
+  try {
+    // PaddleOCR 返回 {text: Array, points: Array} 格式
+    if (results && results.text && Array.isArray(results.text)) {
+      return results.text.map((textItem: any, index: number) => ({
+        text: String(textItem || ''),
+        confidence: 0.9,
+        bbox: results.points && results.points[index] ? results.points[index] : null
+      }))
+    }
+    
+    if (typeof results === 'string') {
+      return [{ text: results, confidence: 0.9, bbox: null }]
+    }
+    
+    if (Array.isArray(results) && results.length > 0) {
+      return results.map((result: any) => ({
+        text: String(result.text || result.words || result.label || result || ''),
+        confidence: result.confidence || result.score || 0.9,
+        bbox: result.bbox || result.location || result.points || null
+      }))
+    }
+    
+    // 如果都不匹配，尝试直接转换为字符串
+    if (results) {
+      return [{ text: String(results), confidence: 0.9, bbox: null }]
+    }
+    
+    return []
+  } catch (err) {
+    console.error('处理 PaddleOCR 结果时出错:', err)
+    return []
   }
-  return []
 }
 
 const performOCR = async () => {
@@ -520,14 +540,16 @@ const performOCR = async () => {
       ocrResults.value = processTesseractResults(results)
     } else {
       results = await performPaddleOCR(img)
+      console.log('PaddleOCR 原始结果:', results)
       ocrResults.value = processPaddleResults(results)
+      console.log('处理后的结果:', ocrResults.value)
     }
-    
-    console.log('OCR 识别原始结果:', results)
     
     // 检查是否有识别结果
     if (ocrResults.value.length === 0) {
       error.value = '未识别到文字内容'
+    } else {
+      console.log('最终 OCR 结果数量:', ocrResults.value.length)
     }
     
   } catch (err) {
@@ -539,67 +561,20 @@ const performOCR = async () => {
 }
 
 
-// 智能文本清理
-const basicTextClean = (text: string): string => {
-  return text
-    // 移除明显的乱码字符
-    .replace(/[£€¥§¢©®™°±÷×µ¶]/g, '')
-    .replace(/[\u2600-\u26FF\u2700-\u27BF]/g, '') // 移除符号
-    .replace(/[^\u4e00-\u9fff\u3400-\u4dbf\w\s\d.,，。:：；;()（）\-+=/\\]/g, ' ') // 只保留中文、英文、数字和基本标点
-    
-    // 修正常见OCR错误
-    .replace(/[oO](?=\d)/g, '0')
-    .replace(/[lI](?=\d)/g, '1') 
-    .replace(/(\d)[lI]/g, '$11')
-    .replace(/(\d)[oO]/g, '$10')
-    .replace(/[，,](?=\d)/g, '.')
-    
-    // 修正标点符号
-    .replace(/\s*[:：]\s*/g, ': ')
-    .replace(/\s*[,，]\s*/g, ', ')
-    .replace(/\s*[;；]\s*/g, '; ')
-    
-    // 清理多余空格和换行
-    .replace(/\s+/g, ' ')
-    .replace(/\n\s*\n/g, '\n')
-    .trim()
+// 简单文本清理
+const basicTextClean = (text: any): string => {
+  if (typeof text !== 'string') {
+    text = String(text || '')
+  }
+  return text.trim()
 }
 
-// 智能文本整理
+// 简单文本整理
 const cleanAndFormatText = (textArray: string[]): string => {
-  // 逐行清理并过滤无效行
-  const cleanedLines = textArray
+  return textArray
     .map(text => basicTextClean(text))
-    .filter(line => {
-      // 过滤掉太短或明显无意义的行
-      if (line.length < 2) return false
-      // 过滤掉只有符号的行
-      if (/^[\s\W]*$/.test(line) && !/[\u4e00-\u9fff\d]/.test(line)) return false
-      // 过滤掉明显的乱码行（连续的无意义字符）
-      if (/[\w]{10,}/.test(line) && !/[\u4e00-\u9fff]/.test(line)) return false
-      return true
-    })
-  
-  // 智能分组和格式化
-  const formattedLines: string[] = []
-  
-  for (let i = 0; i < cleanedLines.length; i++) {
-    const line = cleanedLines[i]
-    
-    // 检查是否是重要分隔符
-    const isImportantSection = /^(项目名|医疗机构|业务流水号|门诊号|就诊日期)/.test(line)
-    const needSpaceBefore = spaceAfterLines.value.some(keyword => 
-      i > 0 && cleanedLines[i - 1].includes(keyword)
-    )
-    
-    if ((needSpaceBefore || isImportantSection) && formattedLines.length > 0) {
-      formattedLines.push('')
-    }
-    
-    formattedLines.push(line)
-  }
-  
-  return formattedLines.join('\n')
+    .filter(line => line.length > 0)
+    .join('\n')
 }
 
 // 获取整理后的文本（用于预览）
