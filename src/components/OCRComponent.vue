@@ -87,14 +87,42 @@
     </div>
 
     <div v-if="ocrResults.length > 0" class="results-section">
-      <h3>识别结果：</h3>
-      <div class="results-container">
-        <div v-for="(result, index) in ocrResults" :key="index" class="result-item">
-          <p class="result-text">{{ result.text }}</p>
-          <small class="result-confidence">置信度: {{ (result.confidence * 100).toFixed(1) }}%</small>
+      <div class="results-header">
+        <h3>识别结果</h3>
+        <div class="results-stats">
+          <span class="text-count">共 {{ ocrResults.length }} 条文本</span>
+          <span class="avg-confidence">平均置信度: {{ getAverageConfidence() }}%</span>
         </div>
       </div>
-      <button @click="copyAllText" class="copy-btn">复制全部文字</button>
+      
+      <div class="results-container">
+        <div v-for="(result, index) in ocrResults" :key="index" class="result-item">
+          <div class="result-header">
+            <span class="result-index">#{{ index + 1 }}</span>
+            <span class="result-confidence" :class="getConfidenceClass(result.confidence)">
+              {{ (result.confidence * 100).toFixed(1) }}%
+            </span>
+            <button @click="copyText(result.text)" class="copy-single-btn" title="复制此条文本">
+              📋
+            </button>
+          </div>
+          <div class="result-content">
+            <p class="result-text" @click="selectText($event)">{{ result.text }}</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="results-actions">
+        <button @click="copyAllText" class="action-btn primary">
+          📄 复制全部文字
+        </button>
+        <button @click="copyFormattedText" class="action-btn secondary">
+          📋 复制格式化文本
+        </button>
+        <button @click="downloadText" class="action-btn secondary">
+          💾 下载为文本文件
+        </button>
+      </div>
     </div>
 
     <div v-if="error" class="error-section">
@@ -511,15 +539,81 @@ const performOCR = async () => {
   }
 }
 
+// 计算平均置信度
+const getAverageConfidence = () => {
+  if (ocrResults.value.length === 0) return 0
+  const total = ocrResults.value.reduce((sum, result) => sum + result.confidence, 0)
+  return ((total / ocrResults.value.length) * 100).toFixed(1)
+}
+
+// 根据置信度返回样式类
+const getConfidenceClass = (confidence: number) => {
+  const percent = confidence * 100
+  if (percent >= 80) return 'confidence-high'
+  if (percent >= 60) return 'confidence-medium'
+  return 'confidence-low'
+}
+
+// 选中文本
+const selectText = (event: Event) => {
+  const target = event.target as HTMLElement
+  const range = document.createRange()
+  range.selectNodeContents(target)
+  const selection = window.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+}
+
+// 复制单条文本
+const copyText = async (text: string) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    console.log('文字已复制到剪贴板')
+    // 可以添加toast提示
+  } catch (err) {
+    console.error('复制失败:', err)
+  }
+}
+
+// 复制全部文字
 const copyAllText = async () => {
   const allText = ocrResults.value.map(result => result.text).join('\n')
   try {
     await navigator.clipboard.writeText(allText)
-    // 这里可以添加一个成功提示
-    console.log('文字已复制到剪贴板')
+    console.log('全部文字已复制到剪贴板')
   } catch (err) {
     console.error('复制失败:', err)
   }
+}
+
+// 复制格式化文本（带序号和置信度）
+const copyFormattedText = async () => {
+  const formattedText = ocrResults.value
+    .map((result, index) => {
+      return `${index + 1}. ${result.text} (置信度: ${(result.confidence * 100).toFixed(1)}%)`
+    })
+    .join('\n')
+  
+  try {
+    await navigator.clipboard.writeText(formattedText)
+    console.log('格式化文字已复制到剪贴板')
+  } catch (err) {
+    console.error('复制失败:', err)
+  }
+}
+
+// 下载文本文件
+const downloadText = () => {
+  const allText = ocrResults.value.map(result => result.text).join('\n')
+  const blob = new Blob([allText], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `OCR识别结果_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 </script>
 
@@ -700,48 +794,161 @@ const copyAllText = async () => {
   margin-top: 2rem;
 }
 
-.results-section h3 {
-  margin-bottom: 1rem;
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.results-header h3 {
+  margin: 0;
   color: var(--color-heading);
 }
 
+.results-stats {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.text-count, .avg-confidence {
+  background: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+}
+
 .results-container {
-  max-height: 300px;
+  max-height: 400px;
   overflow-y: auto;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 .result-item {
   background: white;
-  border-radius: 4px;
-  padding: 1rem;
-  margin-bottom: 0.5rem;
-  border-left: 4px solid #42b883;
+  border-radius: 6px;
+  padding: 0;
+  margin-bottom: 0.75rem;
+  border: 1px solid #e0e0e0;
+  overflow: hidden;
+  transition: box-shadow 0.2s;
 }
 
-.result-text {
-  margin: 0 0 0.5rem 0;
-  font-size: 16px;
-  line-height: 1.5;
+.result-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.result-index {
+  font-weight: 600;
+  color: #666;
+  font-size: 0.9rem;
 }
 
 .result-confidence {
-  color: #666;
-  font-size: 12px;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
-.copy-btn {
-  background: #007bff;
-  color: white;
+.confidence-high {
+  background: #d4edda;
+  color: #155724;
+}
+
+.confidence-medium {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.confidence-low {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.copy-single-btn {
+  background: transparent;
   border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
+  padding: 0.25rem;
   cursor: pointer;
-  font-size: 14px;
+  border-radius: 4px;
+  transition: background 0.2s;
 }
 
-.copy-btn:hover {
-  background: #0056b3;
+.copy-single-btn:hover {
+  background: #e9ecef;
+}
+
+.result-content {
+  padding: 1rem;
+}
+
+.result-text {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background 0.2s;
+  padding: 0.25rem;
+  border-radius: 4px;
+}
+
+.result-text:hover {
+  background: #f8f9fa;
+}
+
+.results-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.action-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.action-btn.primary {
+  background: #42b883;
+  color: white;
+}
+
+.action-btn.primary:hover {
+  background: #369870;
+}
+
+.action-btn.secondary {
+  background: white;
+  color: #666;
+  border: 1px solid #ddd;
+}
+
+.action-btn.secondary:hover {
+  background: #f8f9fa;
+  border-color: #42b883;
+  color: #42b883;
 }
 
 .error-section {
