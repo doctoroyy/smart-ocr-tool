@@ -1,6 +1,6 @@
-# 智能 OCR 识别工具
+# Smart OCR Tool
 
-一款现代化的前端 OCR 文字识别应用，支持桌面和移动端的高精度文字识别。
+A modern web-based OCR application with high-precision text recognition for both desktop and mobile devices.
 
 [中文文档](./README_zh.md) | English
 
