@@ -1,19 +1,7 @@
 name = "vue-paddleocr-app"
 compatibility_date = "2023-12-01"
 
-[env.production]
-name = "vue-paddleocr-app"
-compatibility_date = "2023-12-01"
+[assets]
+directory = "./dist"
 
-# Pages configuration
 pages_build_output_dir = "dist"
-
-[[env.production.build]]
-command = "pnpm build"
-cwd = "."
-watch_dir = "src"
-
-[build]
-command = "pnpm build"
-cwd = "."
-watch_dir = "src"
