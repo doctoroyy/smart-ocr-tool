@@ -65,8 +65,7 @@
           </button>
           <button 
             @click="switchEngine('paddle')" 
-            :class="{ active: selectedEngine === 'paddle', disabled: !paddleOCRModel }"
-            :disabled="!paddleOCRModel"
+            :class="{ active: selectedEngine === 'paddle' }"
             class="engine-btn"
           >
             ⚡ PaddleOCR
